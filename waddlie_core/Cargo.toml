@@ -1,0 +1,9 @@
+[package]
+name = "waddlie_core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+benvy = {version = "0.18.1", default-features = true, features = [
+    
+]}
