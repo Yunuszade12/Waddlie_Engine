@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bevy + Pure JSON Blockly</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+
+<body>
+
+    <div class="app-container">
+        <div class="canvas-container">
+            <canvas id="bevy-canvas"></canvas>
+            <div class="placeholder-text">Bevy Game View</div>
+
+        </div>
+
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h3>Logic Editor</h3>
+                <div>
+                    <button id="btn-en">EN</button>
+                    <button id="btn-tr">TR</button>
+                </div>
+            </div>
+
+            <div id="blockly-div"></div>
+        </div>
+    </div>
+
+    <script type="module" src="/app.js"></script>
+</body>
+
+</html>

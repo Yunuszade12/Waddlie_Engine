@@ -432,7 +432,7 @@ fn editor_gizmo_interaction_system(
 
                 let denom = ray.direction.dot(plane_normal);
                 if denom.abs() > 1e-5 {
-                    let t = (origin_ref - ray.origin).dot(plane_normal) / denom;
+                    let t = (origin_ref - ray.origin).dot(plane_normal);
                     if t > 0.0 {
                         let current_intersect = ray.origin + *ray.direction * t;
                         let initial_intersect =
