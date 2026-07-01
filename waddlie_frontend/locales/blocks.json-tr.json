@@ -1,0 +1,101 @@
+{
+    "blocks": [
+        {
+            "type": "move_steps",
+            "message0": "%1 adım ilerle 🏃‍♂️",
+            "args0": [
+                {
+                    "type": "field_number",
+                    "name": "STEPS",
+                    "value": 10,
+                    "min": 0
+                }
+            ],
+            "previousStatement": null,
+            "nextStatement": null,
+            "colour": 210,
+            "tooltip": "Oyuncuyu belirtilen adım sayısı kadar ilerletir"
+        },
+        {
+            "type": "rotate_degrees",
+            "message0": "%1 derece döndür 🔄",
+            "args0": [
+                {
+                    "type": "field_angle",
+                    "name": "DEGREES",
+                    "value": 90
+                }
+            ],
+            "previousStatement": null,
+            "nextStatement": null,
+            "colour": 210,
+            "tooltip": "Oyuncuyu belirtilen derece kadar döndürür"
+        },
+        {
+            "type": "when_key_pressed",
+            "message0": "%1 tuşuna basıldığında ⌨️",
+            "args0": [
+                {
+                    "type": "field_dropdown",
+                    "name": "KEY",
+                    "options": [
+                        [
+                            "W / Yukarı Ok",
+                            "W"
+                        ],
+                        [
+                            "S / Aşağı Ok",
+                            "S"
+                        ],
+                        [
+                            "A / Sol Ok",
+                            "A"
+                        ],
+                        [
+                            "D / Sağ Ok",
+                            "D"
+                        ],
+                        [
+                            "Boşluk (Space)",
+                            "SPACE"
+                        ]
+                    ]
+                }
+            ],
+            "nextStatement": null,
+            "colour": 120,
+            "tooltip": "Belirtilen klavye tuşuna basıldığında bir eylemi tetikler"
+        }
+    ],
+    "toolbox": {
+        "kind": "categoryToolbox",
+        "contents": [
+            {
+                "kind": "category",
+                "name": "Etkinlikler",
+                "colour": "120",
+                "contents": [
+                    {
+                        "kind": "block",
+                        "type": "when_key_pressed"
+                    }
+                ]
+            },
+            {
+                "kind": "category",
+                "name": "Hareket",
+                "colour": "210",
+                "contents": [
+                    {
+                        "kind": "block",
+                        "type": "move_steps"
+                    },
+                    {
+                        "kind": "block",
+                        "type": "rotate_degrees"
+                    }
+                ]
+            }
+        ]
+    }
+}

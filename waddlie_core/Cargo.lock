@@ -5794,10 +5794,12 @@ dependencies = [
  "bevy_common_assets",
  "bevy_rapier3d",
  "console_error_panic_hook",
+ "js-sys",
  "rand 0.8.6",
  "serde",
  "serde_json",
  "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

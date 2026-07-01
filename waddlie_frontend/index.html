@@ -5,16 +5,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bevy + Pure JSON Blockly</title>
-    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="./style.css">
+    <script src="https://unpkg.com/blockly/blockly.min.js"></script>
 </head>
 
 <body>
-
     <div class="app-container">
         <div class="canvas-container">
             <canvas id="bevy-canvas"></canvas>
             <div class="placeholder-text">Bevy Game View</div>
-
         </div>
 
         <div class="sidebar">
@@ -22,15 +21,40 @@
                 <h3>Logic Editor</h3>
                 <div>
                     <button id="btn-en">EN</button>
-                    <button id="btn-tr">TR</button>
                 </div>
             </div>
 
-            <div id="blockly-div"></div>
+            <div class="data-lists-panel">
+                <div class="entities-column">
+                    <h4>Entities</h4>
+                    <div id="entities-list-container"></div>
+                </div>
+                <div class="components-column">
+                    <h4>Components</h4>
+                    <div id="components-list-container"></div>
+                </div>
+            </div>
+
+            <div id="blockly-div" style="display: none;"></div>
         </div>
     </div>
 
-    <script type="module" src="/app.js"></script>
+    <script type="module" src="./app.js"></script>
+
+    <script type="module">
+        import init from './wasm/waddlie_core.js';
+
+        async function startEngine() {
+            try {
+                console.log("Initializing Bevy WebAssembly Engine...");
+                await init('./wasm/waddlie_core_bg.wasm');
+                console.log("Bevy Game Window connected successfully!");
+            } catch (error) {
+                console.error("Failed to load Bevy engine canvas instance:", error);
+            }
+        }
+        window.addEventListener('DOMContentLoaded', startEngine);
+    </script>
 </body>
 
 </html>

@@ -1,3 +1,4 @@
+use bevy::asset::{AssetLoader, LoadContext, io::Reader};
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::gizmos::config::GizmoConfigStore;
 use bevy::input::mouse::AccumulatedMouseMotion;
@@ -6,10 +7,18 @@ use bevy::prelude::*;
 use bevy::state::commands;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{Write, read_to_string};
 
-// In your EditorSelection struct resource, change mode:
+// 🚀 WASM-BINDGEN INTEROP CONFIGURATION
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+extern "C" {
+    // Bridges a native browser JavaScript routine to invoke an on-the-fly download layer
+    #[wasm_bindgen(js_namespace = console, js_name = log)]
+    fn js_console_log(s: &str);
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GizmoMode {
@@ -33,11 +42,12 @@ pub struct EditorSelection {
     pub selected: Option<Entity>,
     pub mode: GizmoMode,
     pub active_axis: Option<SelectedAxis>,
-    pub initial_drag_value: Option<Vec3>, // Stores position/rotation/scale when drag started
+    pub initial_drag_value: Option<Vec3>,
     pub last_intersect_point: Option<Vec3>,
     pub backup_translation: Option<Vec3>,
     pub backup_rotation: Option<Quat>,
     pub backup_scale: Option<Vec3>,
+    pub is_local: bool, // 🚀 NEW: Tracks if we use Local (true) or Global (false) coordinates
 }
 
 #[derive(Component)]
@@ -52,11 +62,16 @@ pub struct SceneEntity {
 }
 
 #[derive(Resource)]
-pub struct CurrentScenePath(pub String);
+pub struct CurrentSceneHandle(pub Handle<SceneAsset>);
 
 #[derive(Resource, Default)]
 pub struct LoadedSceneData {
     pub items: Vec<SceneJsonDeserialize>,
+}
+
+#[derive(Resource, Default)]
+pub struct SceneSpawnStatus {
+    pub spawned: bool,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -100,26 +115,79 @@ pub enum JsonComponentKind {
     ImageSkybox { path: String, brightness: f32 },
 }
 
+#[derive(Asset, TypePath, Clone, Debug)]
+pub struct SceneAsset {
+    pub items: Vec<SceneJsonDeserialize>,
+}
+
+// 🚀 FIX: Add TypePath to the derive list
+#[derive(Default, TypePath)]
+pub struct SceneAssetLoader;
+
+#[derive(Debug)]
+pub enum SceneAssetLoaderError {
+    Io(std::io::Error),
+    Json(serde_json::Error),
+}
+
+impl std::fmt::Display for SceneAssetLoaderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(e) => write!(f, "Asset loading IO error: {}", e),
+            Self::Json(e) => write!(f, "Asset JSON parsing error: {}", e),
+        }
+    }
+}
+impl std::error::Error for SceneAssetLoaderError {}
+
+impl AssetLoader for SceneAssetLoader {
+    type Asset = SceneAsset;
+    type Settings = ();
+    type Error = SceneAssetLoaderError;
+
+    async fn load(
+        &self,
+        reader: &mut dyn Reader,
+        _settings: &(),
+        _load_context: &mut LoadContext<'_>,
+    ) -> Result<Self::Asset, Self::Error> {
+        let mut bytes = Vec::new();
+        reader
+            .read_to_end(&mut bytes)
+            .await
+            .map_err(SceneAssetLoaderError::Io)?;
+        let items = serde_json::from_slice(&bytes).map_err(SceneAssetLoaderError::Json)?;
+        Ok(SceneAsset { items })
+    }
+
+    fn extensions(&self) -> &[&str] {
+        &["json"]
+    }
+}
+
 pub fn boot_editor_base(app: &mut App) {
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
             title: "Waddlie Engine".to_string(),
+            canvas: Some("#bevy-canvas".to_string()),
+            fit_canvas_to_parent: true,
+            prevent_default_event_handling: false,
             ..default()
         }),
         ..default()
     }));
 
-    //app.add_plugins(AtmospherePlugin);
+    app.init_asset::<SceneAsset>();
+    app.init_asset_loader::<SceneAssetLoader>();
 
-    app.insert_resource(CurrentScenePath("assets/scene.json".to_string()));
     app.init_resource::<EditorSelection>();
     app.init_resource::<LoadedSceneData>();
+    app.init_resource::<SceneSpawnStatus>();
     app.insert_resource(ClearColor(Color::srgba(0.5, 0.7, 0.9, 1.0)));
 
-    app.add_systems(
-        Startup,
-        (setup_editor_enviroment, load_and_construct_editor_scene),
-    );
+    app.add_systems(Startup, setup_editor_environment);
+    app.add_systems(Update, load_and_construct_editor_scene);
+
     app.add_systems(
         Update,
         (
@@ -131,19 +199,22 @@ pub fn boot_editor_base(app: &mut App) {
     );
 }
 
-fn setup_editor_enviroment(
+fn setup_editor_environment(
     mut commands: Commands,
     mut gizmo_config_store: ResMut<GizmoConfigStore>,
+    asset_server: Res<AssetServer>,
 ) {
     if let Some((_, config, _)) = gizmo_config_store.iter_mut().next() {
         config.depth_bias = -1.0;
     }
-    // Spawn Stuff
+
+    let handle = asset_server.load::<SceneAsset>("scene.json");
+    commands.insert_resource(CurrentSceneHandle(handle));
 
     commands.spawn((
         Camera3d::default(),
         Tonemapping::TonyMcMapface,
-        Transform::from_xyz(0.0, 0.0, 0.0),
+        Transform::from_xyz(0.0, 5.0, 10.0),
         EditorCamera,
     ));
 
@@ -158,35 +229,39 @@ fn setup_editor_enviroment(
 
     commands.spawn(AmbientLight {
         color: Color::WHITE,
-        brightness: 200.0, //lumens i think
+        brightness: 200.0,
         ..default()
     });
 }
 
-//here lets contsruct our scene from json!!
-
 fn load_and_construct_editor_scene(
     mut commands: Commands,
-    scene_path: Res<CurrentScenePath>,
+    scene_handle: Option<Res<CurrentSceneHandle>>,
+    scene_assets: Res<Assets<SceneAsset>>,
+    mut spawn_status: ResMut<SceneSpawnStatus>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materails: ResMut<Assets<StandardMaterial>>,
-    mut scaterring_mediums: ResMut<Assets<ScatteringMedium>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut scattering_mediums: ResMut<Assets<ScatteringMedium>>,
     asset_server: Res<AssetServer>,
     mut scene_data_res: ResMut<LoadedSceneData>,
 ) {
-    //lets get the items from our json file
-    let Ok(file_content) = std::fs::read_to_string(&scene_path.0) else {
-        warn!("Could not find any scene file at{}", &scene_path.0);
+    if spawn_status.spawned {
+        return;
+    }
+    let Some(handle) = scene_handle else {
+        return;
+    };
+    let Some(scene_asset) = scene_assets.get(&handle.0) else {
         return;
     };
 
-    let world: Vec<SceneJsonDeserialize> = serde_json::from_str(&file_content).unwrap_or_default();
+    info!("Scene asset downloaded successfully! Spawning world items...");
+    let world = scene_asset.items.clone();
     scene_data_res.items = world.clone();
 
     let mut id_to_entity_map: HashMap<u32, Entity> = HashMap::new();
     let mut parent_child_relations: Vec<(Entity, u32)> = Vec::new();
 
-    //lets build the scen
     for scene_item in world {
         if let SceneJsonDeserialize::Entity {
             id,
@@ -243,7 +318,7 @@ fn load_and_construct_editor_scene(
                             .insert(Mesh3d(mesh_handle));
                     }
                     JsonComponentKind::Material { color_rgb } => {
-                        let mat_handle = materails.add(StandardMaterial {
+                        let mat_handle = materials.add(StandardMaterial {
                             base_color: Color::linear_rgb(color_rgb[0], color_rgb[1], color_rgb[2]),
                             ..default()
                         });
@@ -263,7 +338,7 @@ fn load_and_construct_editor_scene(
                         commands.entity(spawned_entity_id).add_child(model_child);
                     }
                     JsonComponentKind::ProceduralSky => {
-                        let medium_handle = scaterring_mediums.add(ScatteringMedium::default());
+                        let medium_handle = scattering_mediums.add(ScatteringMedium::default());
                         commands
                             .entity(spawned_entity_id)
                             .insert(Atmosphere::earthlike(medium_handle));
@@ -279,26 +354,23 @@ fn load_and_construct_editor_scene(
             commands.entity(child_entity).insert(ChildOf(parent_entity));
         }
     }
+
+    spawn_status.spawned = true;
 }
 
-/// System to handle 1, 2, 3 mode switching
 fn gizmo_mode_switch_system(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut selection: ResMut<EditorSelection>,
 ) {
     if keyboard_input.just_pressed(KeyCode::Digit1) {
         selection.mode = GizmoMode::Translate;
-        info!("Gizmo Mode: Translation (Move)");
     } else if keyboard_input.just_pressed(KeyCode::Digit2) {
         selection.mode = GizmoMode::Rotate;
-        info!("Gizmo Mode: Rotation");
     } else if keyboard_input.just_pressed(KeyCode::Digit3) {
         selection.mode = GizmoMode::Scale;
-        info!("Gizmo Mode: Scale");
     }
 }
 
-/// Advanced raycasting and plane-intersection manipulation engine
 fn editor_gizmo_interaction_system(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mouse_input: Res<ButtonInput<MouseButton>>,
@@ -307,7 +379,6 @@ fn editor_gizmo_interaction_system(
     targets_query: Query<(Entity, &GlobalTransform), With<SceneEntity>>,
     mut transforms_query: Query<(&mut Transform, &SceneEntity)>,
     mut selection: ResMut<EditorSelection>,
-    scene_path: Res<CurrentScenePath>,
     mut scene_data: ResMut<LoadedSceneData>,
 ) {
     let Ok(window) = window_query.single() else {
@@ -327,8 +398,20 @@ fn editor_gizmo_interaction_system(
         Err(_) => return,
     };
 
-    // --- STEP 1: OBJECT SELECTION FALLBACK (When completely idle) ---
-    // --- STEP 1: OBJECT SELECTION FALLBACK (When not actively dragging/transforming) ---
+    // 🚀 NEW: Toggle Local vs Global coordinates with 'J'
+    if keyboard_input.just_pressed(KeyCode::KeyJ) {
+        selection.is_local = !selection.is_local;
+        info!(
+            "Coordinate System Switched to: {}",
+            if selection.is_local {
+                "LOCAL"
+            } else {
+                "GLOBAL"
+            }
+        );
+    }
+
+    // 1. SELECT AN ENTITY
     if selection.active_axis.is_none() {
         if mouse_input.just_pressed(MouseButton::Left) && !mouse_input.pressed(MouseButton::Right) {
             let mut closest_hit: Option<(Entity, f32)> = None;
@@ -349,7 +432,6 @@ fn editor_gizmo_interaction_system(
                 }
             }
 
-            // 🔥 FIX: Successfully assign selection and reset the interaction mode state cleanly
             if closest_hit.is_some() {
                 selection.selected = closest_hit.map(|(e, _)| e);
                 selection.mode = GizmoMode::None;
@@ -360,7 +442,7 @@ fn editor_gizmo_interaction_system(
         }
     }
 
-    // --- STEP 2: BLENDER MODAL TRIGGER HOTKEYS ---
+    // 2. ACTIVATE GIZMO MODES (G, R, or F)
     if let Some(selected_entity) = selection.selected {
         if selection.active_axis.is_none() {
             if let Ok((transform, _)) = transforms_query.get(selected_entity) {
@@ -370,164 +452,210 @@ fn editor_gizmo_interaction_system(
                     chosen_mode = GizmoMode::Translate;
                 } else if keyboard_input.just_pressed(KeyCode::KeyR) {
                     chosen_mode = GizmoMode::Rotate;
-                } else if keyboard_input.just_pressed(KeyCode::KeyS) {
+                } else if keyboard_input.just_pressed(KeyCode::KeyF) {
                     chosen_mode = GizmoMode::Scale;
                 }
 
                 if chosen_mode != GizmoMode::None {
                     selection.mode = chosen_mode;
-
-                    // Lock onto a camera-facing plane baseline when starting transformation
-                    let plane_normal = camera_transform.forward();
-                    let denom = ray.direction.dot(*plane_normal);
-                    let initial_proj = if denom.abs() > 1e-5 {
-                        let t = (transform.translation - ray.origin).dot(*plane_normal) / denom;
-                        ray.origin + *ray.direction * t
-                    } else {
-                        transform.translation
-                    };
-
-                    selection.last_intersect_point = Some(initial_proj);
-                    selection.initial_drag_value = Some(transform.translation);
-
-                    // Save restoration state to enable Right-Click / Escape cancellation maps
+                    selection.last_intersect_point =
+                        Some(Vec3::new(cursor_pos.x, cursor_pos.y, 0.0));
                     selection.backup_translation = Some(transform.translation);
                     selection.backup_rotation = Some(transform.rotation);
                     selection.backup_scale = Some(transform.scale);
-
-                    // Default to unconstrained viewport space dragging until X, Y, or Z is clicked
                     selection.active_axis = Some(SelectedAxis::None);
                 }
             }
         }
     }
 
-    // --- STEP 3: BLENDER AXIS LOCKING CONTROLS ---
+    // 3. LOCK AXIS (X, Y, Z)
     if selection.active_axis.is_some() {
+        let mut axis_changed = false;
+        let mut new_axis = selection.active_axis.unwrap();
+
         if keyboard_input.just_pressed(KeyCode::KeyX) {
-            selection.active_axis = Some(SelectedAxis::X);
+            new_axis = SelectedAxis::X;
+            axis_changed = true;
         } else if keyboard_input.just_pressed(KeyCode::KeyY) {
-            selection.active_axis = Some(SelectedAxis::Y);
+            new_axis = SelectedAxis::Y;
+            axis_changed = true;
         } else if keyboard_input.just_pressed(KeyCode::KeyZ) {
-            selection.active_axis = Some(SelectedAxis::Z);
+            new_axis = SelectedAxis::Z;
+            axis_changed = true;
+        }
+
+        if axis_changed {
+            selection.active_axis = Some(new_axis);
+            if let Some(selected_entity) = selection.selected {
+                if let Ok((mut transform, _)) = transforms_query.get_mut(selected_entity) {
+                    if let Some(pos) = selection.backup_translation {
+                        transform.translation = pos;
+                    }
+                    if let Some(rot) = selection.backup_rotation {
+                        transform.rotation = rot;
+                    }
+                    if let Some(scl) = selection.backup_scale {
+                        transform.scale = scl;
+                    }
+                }
+            }
+            selection.last_intersect_point = Some(Vec3::new(cursor_pos.x, cursor_pos.y, 0.0));
         }
     }
 
-    // --- STEP 4: ACTIVE LIVE TRANSFORMATION PROCESSING ---
+    // 4. APPLY TRANSFORMATIONS
     if selection.active_axis.is_some() {
         if let Some(selected_entity) = selection.selected {
             if let Ok((mut transform, scene_entity)) = transforms_query.get_mut(selected_entity) {
-                let origin_ref = selection
-                    .initial_drag_value
-                    .unwrap_or(transform.translation);
                 let active_axis = selection.active_axis.unwrap();
+                let start_mouse = selection.last_intersect_point.unwrap_or(Vec3::ZERO);
+                let delta_x = cursor_pos.x - start_mouse.x;
 
-                // Compute plane intersections depending on chosen axis lock constraint rules
-                let plane_normal = match active_axis {
-                    SelectedAxis::X => Vec3::Y,
-                    SelectedAxis::Y => Vec3::X,
-                    SelectedAxis::Z => Vec3::Y,
-                    SelectedAxis::None => *camera_transform.forward(),
-                };
-
-                let denom = ray.direction.dot(plane_normal);
-                if denom.abs() > 1e-5 {
-                    let t = (origin_ref - ray.origin).dot(plane_normal);
-                    if t > 0.0 {
-                        let current_intersect = ray.origin + *ray.direction * t;
-                        let initial_intersect =
-                            selection.last_intersect_point.unwrap_or(origin_ref);
-                        let total_delta = current_intersect - initial_intersect;
-
-                        match selection.mode {
-                            GizmoMode::Translate => {
-                                if let Some(initial_pos) = selection.backup_translation {
-                                    match active_axis {
-                                        SelectedAxis::X => {
-                                            transform.translation =
-                                                initial_pos + Vec3::new(total_delta.x, 0.0, 0.0)
-                                        }
-                                        SelectedAxis::Y => {
-                                            transform.translation =
-                                                initial_pos + Vec3::new(0.0, total_delta.y, 0.0)
-                                        }
-                                        SelectedAxis::Z => {
-                                            transform.translation =
-                                                initial_pos + Vec3::new(0.0, 0.0, total_delta.z)
-                                        }
-                                        SelectedAxis::None => {
-                                            transform.translation = initial_pos + total_delta
-                                        }
+                if active_axis == SelectedAxis::None {
+                    // 🚀 UNCONSTRAINED/VIEW-SPACE MANIPULATION
+                    match selection.mode {
+                        GizmoMode::Translate => {
+                            let plane_normal = *camera_transform.forward();
+                            let denom = ray.direction.dot(plane_normal);
+                            if denom.abs() > 1e-5 {
+                                let origin_ref = selection
+                                    .backup_translation
+                                    .unwrap_or(transform.translation);
+                                let t = (origin_ref - ray.origin).dot(plane_normal) / denom;
+                                if t > 0.0 {
+                                    let current_intersect = ray.origin + *ray.direction * t;
+                                    if let Some(init_pos) = selection.backup_translation {
+                                        transform.translation =
+                                            init_pos + (current_intersect - origin_ref);
                                     }
                                 }
                             }
-                            GizmoMode::Rotate => {
-                                if let Some(initial_rot) = selection.backup_rotation {
-                                    let distance_delta =
-                                        total_delta.length() * total_delta.x.signum() * 0.3;
-                                    match active_axis {
-                                        SelectedAxis::X => {
-                                            transform.rotation =
-                                                initial_rot * Quat::from_rotation_x(distance_delta)
-                                        }
-                                        SelectedAxis::Y => {
-                                            transform.rotation =
-                                                initial_rot * Quat::from_rotation_y(distance_delta)
-                                        }
-                                        SelectedAxis::Z => {
-                                            transform.rotation =
-                                                initial_rot * Quat::from_rotation_z(distance_delta)
-                                        }
-                                        SelectedAxis::None => {
-                                            transform.rotation =
-                                                initial_rot * Quat::from_rotation_z(distance_delta)
-                                        }
-                                    }
-                                }
-                            }
-                            GizmoMode::Scale => {
-                                if let Some(initial_scale) = selection.backup_scale {
-                                    let scale_multiplier: f32 = 1.0 + (total_delta.x * 0.3);
-                                    let factor = scale_multiplier.max(0.01_f32);
-                                    match active_axis {
-                                        SelectedAxis::X => {
-                                            transform.scale = Vec3::new(
-                                                initial_scale.x * factor,
-                                                initial_scale.y,
-                                                initial_scale.z,
-                                            )
-                                        }
-                                        SelectedAxis::Y => {
-                                            transform.scale = Vec3::new(
-                                                initial_scale.x,
-                                                initial_scale.y * factor,
-                                                initial_scale.z,
-                                            )
-                                        }
-                                        SelectedAxis::Z => {
-                                            transform.scale = Vec3::new(
-                                                initial_scale.x,
-                                                initial_scale.y,
-                                                initial_scale.z * factor,
-                                            )
-                                        }
-                                        SelectedAxis::None => {
-                                            transform.scale = initial_scale * factor
-                                        }
-                                    }
-                                }
-                            }
-                            _ => {}
                         }
+                        GizmoMode::Rotate => {
+                            if let Some(initial_rot) = selection.backup_rotation {
+                                // 🚀 FIXED: Rotates relative to the screen look-direction (view space)
+                                let sensitivity = 0.005;
+                                let angle = delta_x * sensitivity;
+                                let view_rotation =
+                                    Quat::from_axis_angle(*camera_transform.forward(), angle);
+                                transform.rotation = view_rotation * initial_rot;
+                            }
+                        }
+                        GizmoMode::Scale => {
+                            if let Some(initial_scale) = selection.backup_scale {
+                                // 🚀 FIXED: Uniform scaling scaling everything in proportion
+                                let sensitivity = 0.005;
+                                let percentage = (1.0 + delta_x * sensitivity).max(0.05);
+                                transform.scale = initial_scale * percentage;
+                            }
+                        }
+                        _ => {}
+                    }
+                } else {
+                    // 🚀 CONSTRAINED AXIS MANIPULATION (LOCAL VS GLOBAL LOGIC)
+                    match selection.mode {
+                        GizmoMode::Translate => {
+                            if let Some(initial_pos) = selection.backup_translation {
+                                let sensitivity = 0.05;
+                                let amount = delta_x * sensitivity;
+
+                                if selection.is_local {
+                                    // Move along the object's own local direction vectors
+                                    let local_dir = match active_axis {
+                                        SelectedAxis::X => transform.local_x(),
+                                        SelectedAxis::Y => transform.local_y(),
+                                        SelectedAxis::Z => transform.local_z(),
+                                        _ => Dir3::X,
+                                    };
+                                    transform.translation = initial_pos + *local_dir * amount;
+                                } else {
+                                    // World Space Coordinates
+                                    match active_axis {
+                                        SelectedAxis::X => {
+                                            transform.translation.x = initial_pos.x + amount
+                                        }
+                                        SelectedAxis::Y => {
+                                            transform.translation.y = initial_pos.y + amount
+                                        }
+                                        SelectedAxis::Z => {
+                                            transform.translation.z = initial_pos.z + amount
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                        GizmoMode::Rotate => {
+                            if let Some(initial_rot) = selection.backup_rotation {
+                                let sensitivity = 0.005;
+                                let angle = delta_x * sensitivity;
+
+                                if selection.is_local {
+                                    // Rotate around local axis vectors
+                                    match active_axis {
+                                        SelectedAxis::X => {
+                                            transform.rotation =
+                                                initial_rot * Quat::from_rotation_x(angle)
+                                        }
+                                        SelectedAxis::Y => {
+                                            transform.rotation =
+                                                initial_rot * Quat::from_rotation_y(angle)
+                                        }
+                                        SelectedAxis::Z => {
+                                            transform.rotation =
+                                                initial_rot * Quat::from_rotation_z(angle)
+                                        }
+                                        _ => {}
+                                    }
+                                } else {
+                                    // Rotate around global world axis vectors
+                                    match active_axis {
+                                        SelectedAxis::X => {
+                                            transform.rotation =
+                                                Quat::from_rotation_x(angle) * initial_rot
+                                        }
+                                        SelectedAxis::Y => {
+                                            transform.rotation =
+                                                Quat::from_rotation_y(angle) * initial_rot
+                                        }
+                                        SelectedAxis::Z => {
+                                            transform.rotation =
+                                                Quat::from_rotation_z(angle) * initial_rot
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                        GizmoMode::Scale => {
+                            if let Some(initial_scale) = selection.backup_scale {
+                                let sensitivity = 0.005;
+                                let percentage = (1.0 + delta_x * sensitivity).max(0.05);
+                                // Note: Scale is fundamentally an object-local property in Bevy
+                                match active_axis {
+                                    SelectedAxis::X => {
+                                        transform.scale.x = initial_scale.x * percentage
+                                    }
+                                    SelectedAxis::Y => {
+                                        transform.scale.y = initial_scale.y * percentage
+                                    }
+                                    SelectedAxis::Z => {
+                                        transform.scale.z = initial_scale.z * percentage
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        _ => {}
                     }
                 }
 
-                // --- CONFIRMATION (Left Click) ---
+                // 5. CONFIRMATION OR CANCEL
                 if mouse_input.just_pressed(MouseButton::Left) {
                     selection.active_axis = None;
-                    selection.mode = GizmoMode::None; // Safe reset back to plain enum variant
+                    selection.mode = GizmoMode::None;
 
-                    // 🔥 FIX: Use the existing `transform` and `scene_entity` values instead of re-borrowing transforms_query
                     let (euler_x, euler_y, euler_z) = transform.rotation.to_euler(EulerRot::XYZ);
                     for item in scene_data.items.iter_mut() {
                         if let &mut SceneJsonDeserialize::Entity {
@@ -558,10 +686,9 @@ fn editor_gizmo_interaction_system(
                             }
                         }
                     }
-                    let _ = save_scene_to_disk(&scene_path.0, &scene_data.items);
+                    trigger_web_scene_download(&scene_data.items);
                 }
 
-                // --- ESCAPE / CANCEL ACTION (Right Click or Esc Key) ---
                 if mouse_input.just_pressed(MouseButton::Right)
                     || keyboard_input.just_pressed(KeyCode::Escape)
                 {
@@ -574,7 +701,6 @@ fn editor_gizmo_interaction_system(
                     if let Some(scl) = selection.backup_scale {
                         transform.scale = scl;
                     }
-
                     selection.active_axis = None;
                     selection.mode = GizmoMode::None;
                 }
@@ -592,12 +718,10 @@ fn render_native_gizmos_system(
         if let Ok(global_transform) = global_transforms.get(selected_entity) {
             let pos = global_transform.translation();
 
-            // Set up clean base axis color definitions
             let color_x = Color::srgb(1.0, 0.1, 0.1);
             let color_y = Color::srgb(0.1, 1.0, 0.1);
             let color_z = Color::srgb(0.1, 0.1, 1.0);
 
-            // If an active transformation mode is engaged, project long infinitely tracking guideline indicators
             if let Some(axis) = selection.active_axis {
                 match axis {
                     SelectedAxis::X => {
@@ -610,7 +734,6 @@ fn render_native_gizmos_system(
                         gizmos.line(pos - Vec3::Z * 50.0, pos + Vec3::Z * 50.0, color_z)
                     }
                     SelectedAxis::None => {
-                        // Highlight all 3 lines subtly if moving globally in screen space coordinates
                         gizmos.line(
                             pos - Vec3::X * 2.0,
                             pos + Vec3::X * 2.0,
@@ -629,7 +752,6 @@ fn render_native_gizmos_system(
                     }
                 }
             } else {
-                // Default view: Display clean 3D handle profiles while an item is highlighted idling
                 gizmos.cube(
                     Transform::from_translation(pos + Vec3::X * 1.0)
                         .with_scale(Vec3::new(2.0, 0.05, 0.05)),
@@ -698,12 +820,23 @@ fn editor_camera_fly_system(
     }
 }
 
-pub fn save_scene_to_disk(
-    path: &str,
-    scene_data: &Vec<SceneJsonDeserialize>,
-) -> std::io::Result<()> {
-    let json_string = serde_json::to_string_pretty(scene_data).unwrap();
-    let mut file = File::create(path)?;
-    file.write_all(json_string.as_bytes())?;
-    Ok(())
+pub fn trigger_web_scene_download(scene_data: &Vec<SceneJsonDeserialize>) {
+    let json_string = serde_json::to_string(&scene_data).unwrap(); // Use compact string for storage space
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Some(window) = web_sys::window() {
+            if let Ok(Some(local_storage)) = window.local_storage() {
+                // Saves the JSON directly into browser sandbox RAM
+                if let Ok(_) = local_storage.set_item("waddlie_current_scene", &json_string) {
+                    js_console_log("Wasm Interop: Scene auto-saved to browser LocalStorage RAM.");
+                }
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        println!("Desktop Auto-Save: {}", json_string);
+    }
 }

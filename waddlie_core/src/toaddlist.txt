@@ -1,0 +1,17 @@
+Physics(must add)
+Lights
+
+
+particle system, Trail system ,Line renderer
+Simple aniamtion play systems.
+
+Reflection probels
+Audio system
+Post Processing
+Scenes(like in unity or levels)
+Custom shader supports for getres waves for ocean games or outline etc.(maybe)
+
+UI(
+    image
+    text pannel toggle slider scrollbar dropdown input field 
+)

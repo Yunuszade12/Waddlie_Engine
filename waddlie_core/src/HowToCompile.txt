@@ -1,0 +1,4 @@
+For wasm:
+>>>>cargo build --target wasm32-unknown-unknown --release  
+and 
+>>>>>wasm-bindgen --out-dir ./wasm/ --target web target/wasm32-unknown-unknown/release/waddlie_core.wasm
