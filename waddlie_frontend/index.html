@@ -24,10 +24,91 @@
                 </div>
             </div>
 
+
+
             <div class="data-lists-panel">
                 <div class="entities-column">
                     <h4>Entities</h4>
                     <div id="entities-list-container"></div>
+                </div>
+
+
+                <!-- Inside your sidebar or header actions -->
+                <div class="actions-panel" style="padding: 10px; display: flex; gap: 8px;">
+                    <button id="btn-import-glb"
+                        style="background: #7289da; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-weight: bold;">
+                        Import GLB Model
+                    </button>
+                    <input type="file" id="glb-file-picker" accept=".glb" style="display: none;" />
+                </div>
+
+                <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+                <!-- Update the existing actions-panel block inside index.html to look like this -->
+                <div class="actions-panel" style="padding: 10px; display: flex; gap: 8px;">
+
+
+
+                    <button id="btn-export-project"
+                        style="background: #43b581; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-weight: bold;">
+                        Export Game.zip
+                    </button>
+                </div>
+
+
+                <div id="model-importer-panel"
+                    style="display: none; padding: 16px; background: #2c2f33; border-radius: 8px; margin: 10px; border: 1px solid #43b581;">
+                    <h4 style="margin-top: 0; color: #43b581;">Configure Imported Model</h4>
+                    <p id="imported-file-name" style="font-size: 11px; color: #99aab5;"></p>
+
+                    <div style="margin-bottom: 12px;">
+                        <label style="display: block; font-size: 12px; margin-bottom: 4px;">Default Pose /
+                            Animation:</label>
+                        <select id="import-animation-dropdown"
+                            style="width: 100%; padding: 6px; background: #23272a; border: 1px solid #202225; color: #fff; border-radius: 4px;">
+                            <option value="__DEFAULT_POSE__">-- Default Pose (Static) --</option>
+                        </select>
+                    </div>
+
+                    <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                        <input type="checkbox" id="import-animation-loop" checked />
+                        <label for="import-animation-loop" style="font-size: 12px;">Loop Animation</label>
+                    </div>
+
+                    <button id="btn-confirm-import"
+                        style="width: 100%; padding: 8px; background: #43b581; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">
+                        Save into Scene
+                    </button>
+                </div>
+
+
+                <!-- Insert this inside .sidebar in index_2.html -->
+                <div id="rigging-setup-panel"
+                    style="display: none; padding: 16px; background: #2c2f33; border-radius: 8px; margin: 10px; border: 1px solid #7289da;">
+                    <h4 style="margin-top: 0; color: #7289da;">🦴 Rigging Selection Mode</h4>
+                    <p style="font-size: 11px; color: #99aab5; margin-bottom: 12px;">
+                        Hold <strong>CTRL</strong> and click bones inside the Bevy viewport to multi-select.
+                    </p>
+
+                    <div style="font-size: 12px; font-weight: bold; margin-bottom: 4px;">Selected Bones:</div>
+                    <div id="selected-bones-list"
+                        style="background: #23272a; padding: 8px; border-radius: 4px; max-height: 150px; overflow-y: auto; margin-bottom: 12px; font-family: monospace; color: #43b581;">
+                        <span style="color: #72767d; font-style: italic;">No bones selected</span>
+                    </div>
+
+                    <div style="margin-bottom: 12px;">
+                        <label for="bone-group-name" style="display: block; font-size: 12px; margin-bottom: 4px;">Bone
+                            Group Name:</label>
+                        <input type="text" id="bone-group-name" placeholder="e.g. UpperBody, LeftArm"
+                            style="width: 100%; padding: 6px; background: #23272a; border: 1px solid #202225; color: #fff; border-radius: 4px; box-sizing: border-box;">
+                    </div>
+
+                    <button id="btn-make-group"
+                        style="width: 100%; padding: 8px; background: #43b581; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; margin-bottom: 6px;">Make
+                        Group</button>
+                    <button id="btn-exit-rigging"
+                        style="width: 100%; padding: 8px; background: #f04747; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">Exit
+                        Setup Mode</button>
                 </div>
                 <div class="components-column">
                     <h4>Components</h4>
@@ -35,7 +116,58 @@
                 </div>
             </div>
 
+
+
+
+
             <div id="blockly-div" style="display: none;"></div>
+        </div>
+
+        <div class="sidebar">
+            <!-- Project Global Controls -->
+            <div class="sidebar-header">
+                <h3>Logic Editor</h3>
+                <div>
+                    <button id="btn-en">EN</button>
+                    <button id="btn-export-project"
+                        style="background: #43b581; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer;">Export
+                        Zip</button>
+                </div>
+            </div>
+
+
+            <div class="assets-panel" style="padding: 10px; border-bottom: 2px solid #202225; background: #2f3136;">
+                <h4>Assets Explorer</h4>
+                <div id="assets-breadcrumbs"
+                    style="font-size: 11px; color: #b9bbbe; margin-bottom: 6px; cursor: pointer;">Root /</div>
+                <div id="assets-file-grid"
+                    style="background: #23272a; min-height: 100px; padding: 8px; border-radius: 4px; display: flex; flex-direction: column; gap: 4px;">
+                    <!-- Folders and uploaded GLBs render here -->
+                </div>
+                <input type="file" id="glb-file-picker" accept=".glb" style="display: none;" />
+            </div>
+
+            <div class="data-lists-panel">
+                <div class="entities-column">
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <h4 style="margin: 0;">Entities</h4>
+
+                        <button id="btn-add-entity"
+                            style="background: #7289da; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: bold;">+
+                            Add Entity</button>
+                    </div>
+                    <div id="entities-list-container"></div>
+                </div>
+
+                <div class="components-column">
+                    <h4 style="margin-bottom: 8px;">Properties Inspector</h4>
+                    <div id="components-list-container"></div>
+                </div>
+            </div>
+
+            <!-- Hidden Rigging Panel Setup remains here -->
+            <div id="rigging-setup-panel" style="display: none;"> ... </div>
         </div>
     </div>
 

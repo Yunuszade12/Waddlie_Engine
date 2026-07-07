@@ -1,0 +1,2 @@
+U gona add dynaims asset panel and changing component values
+Its time for entity spawn and component atatch system with web UI. WE can only change component propertiles for now
